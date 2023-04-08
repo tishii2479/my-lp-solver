@@ -433,7 +433,7 @@ fn parse_lp_file(lp: &str) -> Problem {
         }
         let mut it = line.trim().split(" ").peekable();
         // 名前は飛ばす
-        let name = if it.peek().unwrap_or(&"c:").to_lowercase().ends_with(":") {
+        let name = if it.peek().unwrap_or(&"na").to_lowercase().ends_with(":") {
             let a = it.next().unwrap();
             a[0..a.len() - 1].to_owned()
         } else {
@@ -470,7 +470,6 @@ fn parse_lp_file(lp: &str) -> Problem {
             let var_idx = var_map[var_name];
             expr.push(Term { var_idx, coef });
         }
-        dbg!(cmp);
         let cmp = cmp.unwrap();
         let rhs = it.next().unwrap().parse::<f64>().unwrap();
         constraints.push(Constraint {
