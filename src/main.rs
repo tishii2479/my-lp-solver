@@ -1,4 +1,6 @@
-#[derive(Clone, Copy, PartialEq)]
+use std::collections::HashMap;
+
+#[derive(Clone, Copy, PartialEq, Debug)]
 enum Compare {
     LessEqual,
     Equal,
@@ -49,6 +51,7 @@ impl Term {
 
 #[derive(Clone)]
 struct Constraint {
+    name: String,
     expr: Vec<Term>,
     cmp: Compare,
     rhs: f64,
@@ -128,11 +131,13 @@ impl Problem {
                 continue;
             }
             constraints.push(Constraint {
+                name: c.name.to_owned() + "_1",
                 expr: c.expr.clone(),
                 cmp: Compare::LessEqual,
                 rhs: c.rhs,
             });
             constraints.push(Constraint {
+                name: c.name.to_owned() + "_2",
                 expr: c.expr.clone(),
                 cmp: Compare::GreaterEqual,
                 rhs: c.rhs,
@@ -162,6 +167,7 @@ impl Problem {
             println!("minimize");
         }
 
+        print!("obj: ");
         for (i, term) in self.objective.iter().enumerate() {
             print!("{}", term.to_str(i == 0, &self.variables));
         }
@@ -169,8 +175,12 @@ impl Problem {
 
         println!("subject to");
 
-        for (i, constraint) in self.constraints.iter().enumerate() {
-            println!("c{}: {}", i + 1, constraint.to_str(&self.variables));
+        for constraint in self.constraints.iter() {
+            println!(
+                "{}: {}",
+                constraint.name,
+                constraint.to_str(&self.variables)
+            );
         }
 
         println!("end");
@@ -323,6 +333,7 @@ impl SimplexLpSolver {
             }
             module.b[pivot_c_idx] /= div;
 
+            // 制約式の更新
             for i in 0..module.m {
                 if i == pivot_c_idx {
                     continue;
@@ -364,69 +375,144 @@ impl Solver for SimplexLpSolver {
     }
 }
 
-fn main() {}
+fn parse_lp_file(lp: &str) -> Problem {
+    let mut lines = lp.lines();
+    let problem_objective = lines.next().unwrap().trim().to_lowercase();
+    assert!(
+        problem_objective == "maximize" || problem_objective == "minimize",
+        "problem objective should be `maximize` or `minimize`, actual value: {}",
+        problem_objective
+    );
+    let is_maximize = problem_objective == "maximize";
+
+    // 目的関数のパース
+    let mut it = lines.next().unwrap().trim().split(" ").peekable();
+    if it.peek().unwrap_or(&"obj:").to_lowercase() == "obj:" {
+        it.next();
+    }
+
+    let mut objective = vec![];
+    let mut variables = vec![];
+    let mut var_map = HashMap::new();
+
+    while let Some(mut t) = it.next() {
+        let sign = if t == "-" {
+            t = it.next().unwrap();
+            -1.
+        } else if t == "+" {
+            t = it.next().unwrap();
+            1.
+        } else if t.parse::<f64>().is_ok() && objective.len() == 0 {
+            // 目的関数の最初の項は、+がなくても正の値と解釈する
+            1.
+        } else {
+            panic!("unexpected str: {}", t);
+        };
+        let coef_abs = t.parse::<f64>().unwrap();
+        let coef = sign * coef_abs;
+        let var_name = it.next().unwrap();
+        let var_idx = var_map.len();
+        objective.push(Term { var_idx, coef });
+
+        if !var_map.contains_key(var_name) {
+            var_map.insert(var_name, var_idx);
+            variables.push(Variable {
+                name: var_name.to_string(),
+                var_type: VariableType::Real,
+                is_free: false,
+            })
+        }
+    }
+
+    // 制約のパース
+    assert_eq!(lines.next().unwrap().trim().to_lowercase(), "subject to");
+    let mut constraints = vec![];
+    for line in lines {
+        if line.trim().to_lowercase() == "end" {
+            break;
+        }
+        let mut it = line.trim().split(" ").peekable();
+        // 名前は飛ばす
+        let name = if it.peek().unwrap_or(&"c:").to_lowercase().ends_with(":") {
+            let a = it.next().unwrap();
+            a[0..a.len() - 1].to_owned()
+        } else {
+            format!("c{}", constraints.len() + 1)
+        };
+
+        let mut expr = vec![];
+        let mut cmp = None;
+        while let Some(mut t) = it.next() {
+            let sign = if t == "-" {
+                t = it.next().unwrap();
+                -1.
+            } else if t == "+" {
+                t = it.next().unwrap();
+                1.
+            } else if t.parse::<f64>().is_ok() && expr.len() == 0 {
+                // 目的関数の最初の項は、+がなくても正の値と解釈する
+                1.
+            } else if t == Compare::LessEqual.to_str() {
+                cmp = Some(Compare::LessEqual);
+                break;
+            } else if t == Compare::Equal.to_str() {
+                cmp = Some(Compare::Equal);
+                break;
+            } else if t == Compare::GreaterEqual.to_str() {
+                cmp = Some(Compare::GreaterEqual);
+                break;
+            } else {
+                panic!("unexpected str: {}", t);
+            };
+            let coef_abs = t.parse::<f64>().unwrap();
+            let coef = sign * coef_abs;
+            let var_name = it.next().unwrap();
+            let var_idx = var_map[var_name];
+            expr.push(Term { var_idx, coef });
+        }
+        dbg!(cmp);
+        let cmp = cmp.unwrap();
+        let rhs = it.next().unwrap().parse::<f64>().unwrap();
+        constraints.push(Constraint {
+            name,
+            expr,
+            cmp,
+            rhs,
+        })
+    }
+
+    Problem {
+        is_maximize,
+        variables,
+        objective,
+        constraints,
+    }
+}
+
+fn main() {
+    let problem = parse_lp_file(
+        "maximize
+obj: 5 x + 4 y
+subject to
+1.5 x + 3 y <= 13.5
+3 x + 1 y <= 10
+end
+",
+    );
+    problem.output();
+}
 
 #[test]
 fn test_simple_lp_problem() {
-    let problem = Problem {
-        is_maximize: true,
-        variables: vec![
-            Variable {
-                name: "x".to_owned(),
-                var_type: VariableType::Real,
-                is_free: false,
-            },
-            Variable {
-                name: "y".to_owned(),
-                var_type: VariableType::Real,
-                is_free: false,
-            },
-        ],
-        objective: vec![
-            Term {
-                var_idx: 0,
-                coef: 5.,
-            },
-            Term {
-                var_idx: 1,
-                coef: 4.,
-            },
-        ],
-        constraints: vec![
-            Constraint {
-                expr: vec![
-                    Term {
-                        var_idx: 0,
-                        coef: 1.5,
-                    },
-                    Term {
-                        var_idx: 1,
-                        coef: 3.,
-                    },
-                ],
-                cmp: Compare::LessEqual,
-                rhs: 13.5,
-            },
-            Constraint {
-                expr: vec![
-                    Term {
-                        var_idx: 0,
-                        coef: 3.,
-                    },
-                    Term {
-                        var_idx: 1,
-                        coef: 1.,
-                    },
-                ],
-                cmp: Compare::LessEqual,
-                rhs: 10.,
-            },
-        ],
-    };
-
-    let problem = problem.normalized();
-    problem.output();
-
+    let problem = parse_lp_file(
+        "maximize
+obj: 5 x + 4 y
+subject to
+1.5 x + 3 y <= 13.5
+3 x + 1 y <= 10
+end
+",
+    );
     let solver = SimplexLpSolver;
     let obj = solver.solve(&problem);
 
