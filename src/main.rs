@@ -178,7 +178,7 @@ impl Problem {
 }
 
 trait Solver {
-    fn solve(&self, problem: &Problem);
+    fn solve(&self, problem: &Problem) -> f64;
 }
 
 struct SimplexModule {
@@ -232,6 +232,20 @@ impl SimplexModule {
         }
     }
 
+    fn round(&mut self) {
+        for i in 0..self.m {
+            for j in 0..self.n {
+                self.a[i][j] = round_to_zero(self.a[i][j]);
+            }
+            self.b[i] = round_to_zero(self.b[i]);
+        }
+        for i in 0..self.n {
+            self.c[i] = round_to_zero(self.c[i]);
+            self.x[i] = round_to_zero(self.x[i]);
+        }
+        self.obj = round_to_zero(self.obj);
+    }
+
     fn dump(&self) {
         let w = 7 * (self.n + 1);
         println!("{}", "=".repeat(w));
@@ -239,14 +253,14 @@ impl SimplexModule {
             for j in 0..self.n {
                 print!("{:6.2} ", self.a[i][j]);
             }
-            print!("{:6.2} ", self.b[i]);
+            print!("|{:6.2}", self.b[i]);
             println!();
         }
         println!("{}", "-".repeat(w));
         for i in 0..self.n {
             print!("{:6.2} ", self.c[i]);
         }
-        print!("{:6.2} ", self.obj);
+        print!("|{:6.2}", self.obj);
         println!();
         println!("{}", "=".repeat(w));
     }
@@ -271,17 +285,7 @@ impl SimplexLpSolver {
         // 単体法
         loop {
             // 誤差対策: 0に近い値を0にする
-            for i in 0..module.m {
-                for j in 0..module.n {
-                    module.a[i][j] = round_to_zero(module.a[i][j]);
-                }
-                module.b[i] = round_to_zero(module.b[i]);
-            }
-            for i in 0..module.n {
-                module.c[i] = round_to_zero(module.c[i]);
-                module.x[i] = round_to_zero(module.x[i]);
-            }
-            module.obj = round_to_zero(module.obj);
+            module.round();
 
             // 被約費用を計算し、変更する非基底変数を選択する
             // Blandの最小添字規則 (= 最大係数規則 + 最小添字規則)
@@ -311,8 +315,6 @@ impl SimplexLpSolver {
                 // 解なし
                 break;
             }
-
-            dbg!(pivot_c_idx, pivot_var_idx);
 
             // 単体表を更新する
             let div = module.a[pivot_c_idx][pivot_var_idx];
@@ -347,18 +349,25 @@ impl SimplexLpSolver {
 }
 
 impl Solver for SimplexLpSolver {
-    fn solve(&self, problem: &Problem) {
+    fn solve(&self, problem: &Problem) -> f64 {
         // 標準形に変換する
         let problem = problem.normalized();
 
         // 単体表を作成する
         let mut module = SimplexModule::from(&problem);
 
+        // 単体法を用いて解を見つける
         self.solve_simplex(&mut module);
+
+        // TODO: 解を返す
+        module.obj
     }
 }
 
-fn main() {
+fn main() {}
+
+#[test]
+fn test_simple_lp_problem() {
     let problem = Problem {
         is_maximize: true,
         variables: vec![
@@ -412,44 +421,14 @@ fn main() {
                 cmp: Compare::LessEqual,
                 rhs: 10.,
             },
-            // Constraint {
-            //     expr: vec![
-            //         Term {
-            //             var_idx: 0,
-            //             coef: 3.,
-            //         },
-            //         Term {
-            //             var_idx: 1,
-            //             coef: 6.,
-            //         },
-            //     ],
-            //     cmp: Compare::GreaterEqual,
-            //     rhs: 5.,
-            // },
-            // Constraint {
-            //     expr: vec![
-            //         Term {
-            //             var_idx: 0,
-            //             coef: 2.,
-            //         },
-            //         Term {
-            //             var_idx: 1,
-            //             coef: 4.,
-            //         },
-            //     ],
-            //     cmp: Compare::Equal,
-            //     rhs: 5.,
-            // },
         ],
     };
 
-    println!("before normalized:");
-    problem.output();
-
-    println!("after normalized:");
     let problem = problem.normalized();
     problem.output();
 
     let solver = SimplexLpSolver;
-    solver.solve(&problem);
+    let obj = solver.solve(&problem);
+
+    assert!(f64::abs(obj - 24.6) < EPS);
 }
