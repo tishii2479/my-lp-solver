@@ -60,6 +60,7 @@ impl Constraint {
     }
 }
 
+#[allow(unused)]
 #[derive(Clone)]
 pub enum VariableType {
     Real,
