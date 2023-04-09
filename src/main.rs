@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 mod parser;
 mod problem;
 
 trait Solver {
-    fn solve(&self, problem: &problem::Problem) -> f64;
+    fn solve(&self, problem: &problem::Problem) -> Result<Solution, String>;
 }
 
 struct SimplexTable {
@@ -117,9 +119,9 @@ impl SimplexTable {
         idx
     }
 
-    fn calc_pivot_c_idx(&self, pivot_var_idx: usize) -> (usize, f64) {
+    fn calc_pivot_c_idx(&self, pivot_var_idx: usize) -> Option<(usize, f64)> {
         let mut theta = f64::MAX;
-        let mut idx = 0;
+        let mut idx = None;
         for i in 0..self.m {
             if self.a[i][pivot_var_idx] <= 0. {
                 continue;
@@ -127,11 +129,14 @@ impl SimplexTable {
             let theta_i = self.b[i] / self.a[i][pivot_var_idx];
             if theta_i < theta {
                 theta = theta_i;
-                idx = i;
+                idx = Some(i);
             }
         }
-        assert_ne!(theta, f64::MAX, "could not find pivot");
-        (idx, theta)
+        if let Some(idx) = idx {
+            Some((idx, theta))
+        } else {
+            None
+        }
     }
 
     fn pivot(&mut self, pivot_c_idx: usize, pivot_var_idx: usize) {
@@ -177,12 +182,22 @@ impl SimplexTable {
     }
 
     fn remove_aritifial_var(&mut self, problem: &problem::Problem) {
-        // 人為変数の列の削除
-        for i in 0..self.m {
-            self.a[i].pop();
+        // 人為変数が基底変数になっている場合、非基底変数に変更する
+        if let Some(artifial_base_c_idx) = self.base_var.iter().position(|&x| x == self.n - 1) {
+            let mut new_base_var_idx = None;
+            for i in 0..self.n {
+                if round_to_zero(self.a[artifial_base_c_idx][i]) != 0.
+                    && !self.base_var.contains(&i)
+                {
+                    new_base_var_idx = Some(i);
+                    break;
+                }
+            }
+            self.pivot(
+                artifial_base_c_idx,
+                new_base_var_idx.expect("was not able to find new candidate of base variable"),
+            );
         }
-        self.c.pop();
-        self.n -= 1;
 
         // 目的変数の再設定
         // 元の目的関数から、基底変数を削除する
@@ -201,16 +216,27 @@ impl SimplexTable {
             }
             self.obj -= mul * self.b[c_idx];
         }
+
+        // 人為変数の列の削除
+        for i in 0..self.m {
+            self.a[i].pop();
+        }
+        self.c.pop();
+        self.n -= 1;
     }
 
-    fn get_ans(&self, problem: &problem::Problem) -> Vec<f64> {
-        let mut ans = vec![0.; problem.variables.len()];
+    fn get_variable_values(&self, problem: &problem::Problem) -> HashMap<String, f64> {
+        let mut variable_values = HashMap::new();
+        for var in problem.variables.iter() {
+            variable_values.insert(var.name.clone(), 0.);
+        }
         for (c_idx, base_var_idx) in self.base_var.iter().enumerate() {
             if *base_var_idx < problem.variables.len() {
-                ans[*base_var_idx] = self.b[c_idx];
+                variable_values
+                    .insert(problem.variables[*base_var_idx].name.clone(), self.b[c_idx]);
             }
         }
-        ans
+        variable_values
     }
 
     fn dump(&self) {
@@ -230,6 +256,7 @@ impl SimplexTable {
         print!("|{:6.2}", self.obj);
         println!();
         println!("{}", "=".repeat(w));
+        dbg!(&self.base_var);
     }
 }
 
@@ -260,13 +287,18 @@ impl SimplexLpSolver {
 
             // cで係数が負の項がない(=最適解が求まっている)
             if table.c[pivot_var_idx] >= 0. {
+                println!("found");
                 break;
             }
 
             // pivot_var_idxの上限(theta)を求める
-            let (pivot_c_idx, theta) = table.calc_pivot_c_idx(pivot_var_idx);
+            let Some((pivot_c_idx, theta)) = table.calc_pivot_c_idx(pivot_var_idx) else {
+                println!("unbounded");
+                break;
+            };
             if theta <= 0. {
                 // 解なし
+                println!("not able to improve any more");
                 break;
             }
 
@@ -281,10 +313,15 @@ impl SimplexLpSolver {
     }
 }
 
+struct Solution {
+    objective_value: f64,
+    variable_values: HashMap<String, f64>,
+}
+
 impl Solver for SimplexLpSolver {
-    fn solve(&self, problem: &problem::Problem) -> f64 {
+    fn solve(&self, raw_problem: &problem::Problem) -> Result<Solution, String> {
         // 標準形に変換する
-        let problem = problem.standardized();
+        let problem = raw_problem.standardized();
 
         // 単体表を作成する
         // constraint.rhs < 0.が負の制約があれば原点は実行可能解ではないため、
@@ -296,7 +333,7 @@ impl Solver for SimplexLpSolver {
             let mut table = SimplexTable::create_auxiliary_table(&problem);
             self.solve_simplex(&mut table);
             if round_to_zero(table.obj) != 0. {
-                panic!("is not feasible");
+                return Err("is not feasible".to_owned());
             }
             table.remove_aritifial_var(&problem);
             table
@@ -304,30 +341,73 @@ impl Solver for SimplexLpSolver {
 
         // 単体法を用いて解を見つける
         self.solve_simplex(&mut table);
-        let ans = table.get_ans(&problem);
-        dbg!(ans);
+        let variable_values = table.get_variable_values(&problem);
 
         // TODO: 解を返す
-        table.obj
+        let objective_value = if raw_problem.is_maximize {
+            table.obj
+        } else {
+            -table.obj
+        };
+
+        Ok(Solution {
+            objective_value,
+            variable_values,
+        })
     }
 }
 
-fn main() {
+fn main() {}
+
+#[test]
+fn test_unfeasible_lp_problem() {
     let problem = parser::parse_lp_file(
         "maximize
-obj: x1 + 2 x2
+obj: x1 + x2
 st
-c1: x1 + x2 <= 6
-c2: x1 + 3 x2 <= 12
-c3: - 3 x1 - 2 x2 <= - 6
+c1: x1 + x2 <= 2
+c2: x1 + x2 >= 3
 end
 ",
     );
     problem.output();
     let solver = SimplexLpSolver;
-    let obj = solver.solve(&problem);
+    let err = solver.solve(&problem).err();
+    assert_eq!(err, Some("is not feasible".to_owned()));
+}
 
-    eprintln!("objective value: {:.2}", obj);
+#[test]
+fn test_equal_auxiliary_lp_problem() {
+    let problem = parser::parse_lp_file(
+        "maximize
+obj: x1 + 3 x2 + 5 x3
+st
+c1: - x1 + x2 + x3 <= 2
+c2: 2 x1 + x2 - x3 = 8
+c3: x1 + 2 x2 - x3 >= 1
+end
+",
+    );
+    problem.output();
+    let solver = SimplexLpSolver;
+    let solution = solver.solve(&problem).unwrap();
+    assert!(f64::abs(solution.objective_value - 56.) < EPS);
+}
+
+#[test]
+fn test_minimize_auxiliary_lp_problem() {
+    let problem = parser::parse_lp_file(
+        "minimize
+obj: 12 x1 + 6 x2 + 10 x3
+st
+c1: x1 + x2 + 2 x3 >= 10
+c2: 3 x1 + x2 + x3 >= 20
+end
+",
+    );
+    let solver = SimplexLpSolver;
+    let solution = solver.solve(&problem).unwrap();
+    assert!(f64::abs(solution.objective_value - 90.) < EPS);
 }
 
 #[test]
@@ -343,9 +423,8 @@ end
 ",
     );
     let solver = SimplexLpSolver;
-    let obj = solver.solve(&problem);
-
-    assert!(f64::abs(obj - 9.) < EPS);
+    let solution = solver.solve(&problem).unwrap();
+    assert!(f64::abs(solution.objective_value - 9.) < EPS);
 }
 
 #[test]
@@ -360,9 +439,8 @@ end
 ",
     );
     let solver = SimplexLpSolver;
-    let obj = solver.solve(&problem);
-
-    assert!(f64::abs(obj - 9.) < EPS);
+    let solution = solver.solve(&problem).unwrap();
+    assert!(f64::abs(solution.objective_value - 9.) < EPS);
 }
 
 #[test]
@@ -377,7 +455,6 @@ end
 ",
     );
     let solver = SimplexLpSolver;
-    let obj = solver.solve(&problem);
-
-    assert!(f64::abs(obj - 24.6) < EPS);
+    let solution = solver.solve(&problem).unwrap();
+    assert!(f64::abs(solution.objective_value - 24.6) < EPS);
 }
