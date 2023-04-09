@@ -12,7 +12,6 @@ struct SimplexTable {
     b: Vec<f64>,
     c: Vec<f64>,
     base_var: Vec<usize>,
-    x: Vec<f64>,
     obj: f64,
 }
 
@@ -27,7 +26,6 @@ impl SimplexTable {
         let mut a = vec![vec![0.; n]; m];
         let mut b = vec![0.; m];
         let mut c = vec![0.; n];
-        let mut x = vec![0.; n];
         let mut base_var = vec![0; m];
         let obj = 0.;
 
@@ -41,10 +39,10 @@ impl SimplexTable {
 
             a[i][slack_var_idx] = 1.;
             b[i] = c.rhs;
-            x[slack_var_idx] = c.rhs;
             base_var[i] = slack_var_idx;
         }
 
+        // 目的関数の作成
         for t in problem.objective.iter() {
             c[t.var_idx] = -t.coef;
         }
@@ -55,7 +53,6 @@ impl SimplexTable {
             a,
             b,
             c,
-            x,
             base_var,
             obj,
         }
@@ -64,15 +61,17 @@ impl SimplexTable {
     fn create_auxiliary_table(problem: &problem::Problem) -> SimplexTable {
         // 前提
         // - 標準形に変換済みの問題を渡す
-        let n = problem.variables.len() + problem.constraints.len() + 1;
+        let n = problem.variables.len() + problem.constraints.len();
         let m = problem.constraints.len();
 
-        let mut a = vec![vec![0.; n]; m];
+        let mut a = vec![vec![0.; n + 1]; m];
         let mut b = vec![0.; m];
-        let mut c = vec![0.; n];
-        let mut x = vec![0.; n];
+        let mut c = vec![0.; n + 1];
         let mut base_var = vec![0; m];
         let obj = 0.;
+
+        let artificial_var_idx = n;
+        let mut artificial_c_idx = 0;
 
         for (i, c) in problem.constraints.iter().enumerate() {
             for t in c.expr.iter() {
@@ -82,25 +81,30 @@ impl SimplexTable {
             let slack_var_idx = n - m + i;
 
             a[i][slack_var_idx] = 1.;
+            a[i][artificial_var_idx] = -1.;
             b[i] = c.rhs;
-            x[slack_var_idx] = c.rhs;
             base_var[i] = slack_var_idx;
+
+            if b[i] < b[artificial_c_idx] {
+                artificial_c_idx = i;
+            }
         }
 
-        for t in problem.objective.iter() {
-            c[t.var_idx] = -t.coef;
-        }
+        // 目的関数の作成
+        c[n] = 1.;
 
-        SimplexTable {
-            n,
+        let mut table = SimplexTable {
+            n: n + 1,
             m,
             a,
             b,
             c,
-            x,
             base_var,
             obj,
-        }
+        };
+        table.pivot(artificial_c_idx, n);
+
+        table
     }
 
     fn calc_pivot_var_idx(&self) -> usize {
@@ -117,12 +121,16 @@ impl SimplexTable {
         let mut theta = f64::MAX;
         let mut idx = 0;
         for i in 0..self.m {
+            if self.a[i][pivot_var_idx] <= 0. {
+                continue;
+            }
             let theta_i = self.b[i] / self.a[i][pivot_var_idx];
             if theta_i < theta {
                 theta = theta_i;
                 idx = i;
             }
         }
+        assert_ne!(theta, f64::MAX, "could not find pivot");
         (idx, theta)
     }
 
@@ -164,9 +172,45 @@ impl SimplexTable {
         }
         for i in 0..self.n {
             self.c[i] = round_to_zero(self.c[i]);
-            self.x[i] = round_to_zero(self.x[i]);
         }
         self.obj = round_to_zero(self.obj);
+    }
+
+    fn remove_aritifial_var(&mut self, problem: &problem::Problem) {
+        // 人為変数の列の削除
+        for i in 0..self.m {
+            self.a[i].pop();
+        }
+        self.c.pop();
+        self.n -= 1;
+
+        // 目的変数の再設定
+        // 元の目的関数から、基底変数を削除する
+        self.c = vec![0.; self.n];
+        for t in problem.objective.iter() {
+            self.c[t.var_idx] = -t.coef;
+        }
+        for (c_idx, base_var_idx) in self.base_var.iter().enumerate() {
+            // NOTE: 無くても良い
+            if round_to_zero(self.c[*base_var_idx]) == 0. {
+                continue;
+            }
+            let mul = self.c[*base_var_idx] / self.a[c_idx][*base_var_idx];
+            for i in 0..self.n {
+                self.c[i] -= mul * self.a[c_idx][i];
+            }
+            self.obj -= mul * self.b[c_idx];
+        }
+    }
+
+    fn get_ans(&self, problem: &problem::Problem) -> Vec<f64> {
+        let mut ans = vec![0.; problem.variables.len()];
+        for (c_idx, base_var_idx) in self.base_var.iter().enumerate() {
+            if *base_var_idx < problem.variables.len() {
+                ans[*base_var_idx] = self.b[c_idx];
+            }
+        }
+        ans
     }
 
     fn dump(&self) {
@@ -249,19 +293,18 @@ impl Solver for SimplexLpSolver {
         let mut table = if origin_is_feasible {
             SimplexTable::create_normal_table(&problem)
         } else {
-            SimplexTable::create_auxiliary_table(&problem)
+            let mut table = SimplexTable::create_auxiliary_table(&problem);
+            self.solve_simplex(&mut table);
+            if round_to_zero(table.obj) != 0. {
+                panic!("is not feasible");
+            }
+            table.remove_aritifial_var(&problem);
+            table
         };
 
         // 単体法を用いて解を見つける
         self.solve_simplex(&mut table);
-
-        let mut ans = vec![0.; problem.variables.len()];
-        for (c_idx, base_var_idx) in table.base_var.iter().enumerate() {
-            if *base_var_idx < problem.variables.len() {
-                ans[*base_var_idx] = table.b[c_idx];
-            }
-        }
-
+        let ans = table.get_ans(&problem);
         dbg!(ans);
 
         // TODO: 解を返す
