@@ -103,6 +103,58 @@ impl SimplexTable {
         }
     }
 
+    fn calc_pivot_var_idx(&self) -> usize {
+        let mut idx = 0;
+        for i in 0..self.n {
+            if self.c[i] < self.c[idx] {
+                idx = i;
+            }
+        }
+        idx
+    }
+
+    fn calc_pivot_c_idx(&self, pivot_var_idx: usize) -> (usize, f64) {
+        let mut theta = f64::MAX;
+        let mut idx = 0;
+        for i in 0..self.m {
+            let theta_i = self.b[i] / self.a[i][pivot_var_idx];
+            if theta_i < theta {
+                theta = theta_i;
+                idx = i;
+            }
+        }
+        (idx, theta)
+    }
+
+    fn pivot(&mut self, pivot_c_idx: usize, pivot_var_idx: usize) {
+        self.base_var[pivot_c_idx] = pivot_var_idx;
+
+        let div = self.a[pivot_c_idx][pivot_var_idx];
+        for i in 0..self.n {
+            self.a[pivot_c_idx][i] /= div;
+        }
+        self.b[pivot_c_idx] /= div;
+
+        // 制約式の更新
+        for i in 0..self.m {
+            if i == pivot_c_idx {
+                continue;
+            }
+            let mul = self.a[i][pivot_var_idx];
+            for j in 0..self.n {
+                self.a[i][j] -= mul * self.a[pivot_c_idx][j];
+            }
+            self.b[i] -= mul * self.b[pivot_c_idx];
+        }
+
+        // 目的関数の更新
+        let mul = self.c[pivot_var_idx];
+        for i in 0..self.n {
+            self.c[i] -= mul * self.a[pivot_c_idx][i];
+        }
+        self.obj -= mul * self.b[pivot_c_idx];
+    }
+
     fn round(&mut self) {
         for i in 0..self.m {
             for j in 0..self.n {
@@ -160,12 +212,7 @@ impl SimplexLpSolver {
 
             // 被約費用を計算し、変更する非基底変数を選択する
             // 最大係数規則 + Blandの最小添字規則
-            let mut pivot_var_idx = 0;
-            for i in 0..table.n {
-                if table.c[i] < table.c[pivot_var_idx] {
-                    pivot_var_idx = i;
-                }
-            }
+            let pivot_var_idx = table.calc_pivot_var_idx();
 
             // cで係数が負の項がない(=最適解が求まっている)
             if table.c[pivot_var_idx] >= 0. {
@@ -173,49 +220,15 @@ impl SimplexLpSolver {
             }
 
             // pivot_var_idxの上限(theta)を求める
-            let mut theta = f64::MAX;
-            let mut pivot_c_idx = 0;
-            for i in 0..table.m {
-                let theta_i = table.b[i] / table.a[i][pivot_var_idx];
-                if theta_i < theta {
-                    theta = theta_i;
-                    pivot_c_idx = i;
-                }
-            }
-
+            let (pivot_c_idx, theta) = table.calc_pivot_c_idx(pivot_var_idx);
             if theta <= 0. {
                 // 解なし
                 break;
             }
 
             // 単体表を更新する
-            let div = table.a[pivot_c_idx][pivot_var_idx];
-            for i in 0..table.n {
-                table.a[pivot_c_idx][i] /= div;
-            }
-            table.b[pivot_c_idx] /= div;
-
             // ピボット操作
-            table.base_var[pivot_c_idx] = pivot_var_idx;
-
-            // 制約式の更新
-            for i in 0..table.m {
-                if i == pivot_c_idx {
-                    continue;
-                }
-                let mul = table.a[i][pivot_var_idx];
-                for j in 0..table.n {
-                    table.a[i][j] -= mul * table.a[pivot_c_idx][j];
-                }
-                table.b[i] -= mul * table.b[pivot_c_idx];
-            }
-
-            // 目的関数の更新
-            let mul = table.c[pivot_var_idx];
-            for i in 0..table.n {
-                table.c[i] -= mul * table.a[pivot_c_idx][i];
-            }
-            table.obj -= mul * table.b[pivot_c_idx];
+            table.pivot(pivot_c_idx, pivot_var_idx);
 
             table.dump();
         }
@@ -248,6 +261,8 @@ impl Solver for SimplexLpSolver {
                 ans[*base_var_idx] = table.b[c_idx];
             }
         }
+
+        dbg!(ans);
 
         // TODO: 解を返す
         table.obj
