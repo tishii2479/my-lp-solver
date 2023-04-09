@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 pub fn parse_lp_file(lp: &str) -> Problem {
     let tokens = tokenize_lp_file(lp);
+
     let mut q = tokens.iter().peekable();
     let mut variable_map: HashMap<String, usize> = HashMap::new();
     let mut is_maximize = None;
@@ -31,9 +32,11 @@ pub fn parse_lp_file(lp: &str) -> Problem {
     }
 
     let mut variables = vec![];
-    for (var_name, var_idx) in variable_map {
+    let mut var_names: Vec<(&String, &usize)> = variable_map.iter().collect();
+    var_names.sort_by(|a, b| a.1.cmp(b.1));
+    for (var_name, _) in var_names {
         variables.push(Variable {
-            name: var_name,
+            name: var_name.to_owned(),
             var_type: VariableType::Real,
             is_free: false,
         });

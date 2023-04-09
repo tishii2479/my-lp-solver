@@ -84,7 +84,7 @@ pub struct Problem {
 }
 
 impl Problem {
-    pub fn normalized(&self) -> Problem {
+    pub fn standardized(&self) -> Problem {
         let objective = if self.is_maximize {
             self.objective.clone()
         } else {
@@ -104,12 +104,12 @@ impl Problem {
                 continue;
             }
             variables.push(Variable {
-                name: var.name.to_string() + "+",
+                name: var.name.to_string() + "_plus",
                 var_type: var.var_type.clone(),
                 is_free: false,
             });
             variables.push(Variable {
-                name: var.name.to_string() + "-",
+                name: var.name.to_string() + "_minus",
                 var_type: var.var_type.clone(),
                 is_free: false,
             });

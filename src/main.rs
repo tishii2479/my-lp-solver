@@ -176,7 +176,7 @@ impl SimplexLpSolver {
 impl Solver for SimplexLpSolver {
     fn solve(&self, problem: &problem::Problem) -> f64 {
         // 標準形に変換する
-        let problem = problem.normalized();
+        let problem = problem.standardized();
 
         // 単体表を作成する
         let mut module = SimplexModule::from(&problem);
