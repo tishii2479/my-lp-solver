@@ -92,6 +92,15 @@ fn tokenize_lp_file(lp: &str) -> Vec<Token> {
     tokens
 }
 
+fn parse_objective(
+    q: &mut std::iter::Peekable<core::slice::Iter<Token>>,
+    variable_map: &mut HashMap<String, usize>,
+) -> (String, Vec<Term>) {
+    let obj_name = parse_name(q, "obj");
+    let expr = parse_expr(q, variable_map);
+    (obj_name, expr)
+}
+
 fn parse_constraints(
     q: &mut std::iter::Peekable<core::slice::Iter<Token>>,
     variable_map: &mut HashMap<String, usize>,
@@ -146,6 +155,21 @@ fn parse_variable(
     };
 }
 
+fn parse_sign_if_exists(q: &mut std::iter::Peekable<core::slice::Iter<Token>>) -> f64 {
+    if let Some(Token::Keyword { val }) = q.peek() {
+        match val {
+            Keyword::Minus | Keyword::Plus => {
+                let sign = if *val == Keyword::Minus { -1. } else { 1. };
+                q.next();
+                sign
+            }
+            _ => 1.,
+        }
+    } else {
+        1.
+    }
+}
+
 fn parse_expr(
     q: &mut std::iter::Peekable<core::slice::Iter<Token>>,
     variable_map: &mut HashMap<String, usize>,
@@ -156,8 +180,7 @@ fn parse_expr(
             Token::Keyword { val } => {
                 match val {
                     Keyword::Minus | Keyword::Plus => {
-                        let sign = if *val == Keyword::Minus { -1. } else { 1. };
-                        q.next();
+                        let sign = parse_sign_if_exists(q);
                         let coef = parse_constant(q).unwrap_or(1.) * sign;
                         let var_idx = parse_variable(q, variable_map);
                         expr.push(Term { var_idx, coef });
@@ -195,15 +218,6 @@ fn parse_expr(
     expr
 }
 
-fn parse_objective(
-    q: &mut std::iter::Peekable<core::slice::Iter<Token>>,
-    variable_map: &mut HashMap<String, usize>,
-) -> (String, Vec<Term>) {
-    let obj_name = parse_name(q, "obj");
-    let expr = parse_expr(q, variable_map);
-    (obj_name, expr)
-}
-
 fn parse_constraint(
     q: &mut std::iter::Peekable<core::slice::Iter<Token>>,
     variable_map: &mut HashMap<String, usize>,
@@ -224,7 +238,8 @@ fn parse_constraint(
             panic!("unexpected token");
         }
     };
-    let rhs = parse_constant(q).expect("expected constant");
+    let sign = parse_sign_if_exists(q);
+    let rhs = sign * parse_constant(q).expect("expected constant");
 
     Constraint {
         name: c_name,

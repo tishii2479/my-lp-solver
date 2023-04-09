@@ -179,6 +179,8 @@ impl Solver for SimplexLpSolver {
         // 標準形に変換する
         let problem = problem.standardized();
 
+        // 実行可能解を見つける
+
         // 単体表を作成する
         let mut module = SimplexModule::from(&problem);
 
@@ -193,10 +195,11 @@ impl Solver for SimplexLpSolver {
 fn main() {
     let problem = parser::parse_lp_file(
         "maximize
-obj: 3 x1 + 2 x2
+obj: x1 + 2 x2
 st
-c1: 2 x1 + x2 <= 6
-c2: x1 + x2 <= 3
+c1: x1 + x2 <= 6
+c2: x1 + 3 x2 <= 12
+c3: - 3 x1 - 2 x2 <= - 6
 end
 ",
     );
@@ -205,6 +208,24 @@ end
     let obj = solver.solve(&problem);
 
     eprintln!("objective value: {:.2}", obj);
+}
+
+#[test]
+fn test_auxiliary_lp_problem() {
+    let problem = parser::parse_lp_file(
+        "maximize
+obj: x1 + 2 x2
+st
+c1: x1 + x2 <= 6
+c2: x1 + 3 x2 <= 12
+c3: - 3 x1 - 2 x2 <= - 6
+end
+",
+    );
+    let solver = SimplexLpSolver;
+    let obj = solver.solve(&problem);
+
+    assert!(f64::abs(obj - 9.) < EPS);
 }
 
 #[test]

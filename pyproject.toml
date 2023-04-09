@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "my-mlp-solver"
+version = "0.1.0"
+description = ""
+authors = ["Tatsuya Ishii <tishii2479@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+PuLP = "^2.7.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
