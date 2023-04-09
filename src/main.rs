@@ -11,6 +11,7 @@ struct SimplexModule {
     a: Vec<Vec<f64>>,
     b: Vec<f64>,
     c: Vec<f64>,
+    base_var: Vec<usize>,
     x: Vec<f64>,
     obj: f64,
 }
@@ -27,6 +28,7 @@ impl SimplexModule {
         let mut b = vec![0.; m];
         let mut c = vec![0.; n];
         let mut x = vec![0.; n];
+        let mut base_var = vec![0; m];
         let obj = 0.;
 
         for (i, c) in problem.constraints.iter().enumerate() {
@@ -39,6 +41,7 @@ impl SimplexModule {
             a[i][slack_var_idx] = 1.;
             b[i] = c.rhs;
             x[slack_var_idx] = c.rhs;
+            base_var[i] = slack_var_idx;
         }
 
         for t in problem.objective.iter() {
@@ -52,6 +55,7 @@ impl SimplexModule {
             b,
             c,
             x,
+            base_var,
             obj,
         }
     }
@@ -148,6 +152,9 @@ impl SimplexLpSolver {
             }
             module.b[pivot_c_idx] /= div;
 
+            // ピボット操作
+            module.base_var[pivot_c_idx] = pivot_var_idx;
+
             // 制約式の更新
             for i in 0..module.m {
                 if i == pivot_c_idx {
@@ -186,6 +193,13 @@ impl Solver for SimplexLpSolver {
 
         // 単体法を用いて解を見つける
         self.solve_simplex(&mut module);
+
+        let mut ans = vec![0.; problem.variables.len()];
+        for (c_idx, base_var_idx) in module.base_var.iter().enumerate() {
+            if *base_var_idx < problem.variables.len() {
+                ans[*base_var_idx] = module.b[c_idx];
+            }
+        }
 
         // TODO: 解を返す
         module.obj
