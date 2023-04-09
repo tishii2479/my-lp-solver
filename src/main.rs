@@ -112,7 +112,7 @@ impl SimplexLpSolver {
             module.round();
 
             // 被約費用を計算し、変更する非基底変数を選択する
-            // Blandの最小添字規則 (= 最大係数規則 + 最小添字規則)
+            // 最大係数規則 + Blandの最小添字規則
             let mut pivot_var_idx = 0;
             for i in 0..module.n {
                 if module.c[i] < module.c[pivot_var_idx] {
@@ -120,11 +120,12 @@ impl SimplexLpSolver {
                 }
             }
 
-            // cで係数が負の項がない、最適解が求まっている
+            // cで係数が負の項がない(=最適解が求まっている)
             if module.c[pivot_var_idx] >= 0. {
                 break;
             }
 
+            // pivot_var_idxの上限(theta)を求める
             let mut theta = f64::MAX;
             let mut pivot_c_idx = 0;
             for i in 0..module.m {
