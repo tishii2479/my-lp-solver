@@ -5,7 +5,7 @@ trait Solver {
     fn solve(&self, problem: &problem::Problem) -> f64;
 }
 
-struct SimplexModule {
+struct SimplexTable {
     n: usize,
     m: usize,
     a: Vec<Vec<f64>>,
@@ -16,12 +16,55 @@ struct SimplexModule {
     obj: f64,
 }
 
-impl SimplexModule {
-    fn from(problem: &problem::Problem) -> SimplexModule {
+impl SimplexTable {
+    fn create_normal_table(problem: &problem::Problem) -> SimplexTable {
         // 前提
         // - 標準形に変換済みの問題を渡す
-        // - x = 0 が実行可能解である
+        // - 原点が実行可能解である
         let n = problem.variables.len() + problem.constraints.len();
+        let m = problem.constraints.len();
+
+        let mut a = vec![vec![0.; n]; m];
+        let mut b = vec![0.; m];
+        let mut c = vec![0.; n];
+        let mut x = vec![0.; n];
+        let mut base_var = vec![0; m];
+        let obj = 0.;
+
+        for (i, c) in problem.constraints.iter().enumerate() {
+            assert!(c.rhs >= 0., "constraint has negative rhs: {:?}", c);
+            for t in c.expr.iter() {
+                a[i][t.var_idx] = t.coef;
+            }
+
+            let slack_var_idx = n - m + i;
+
+            a[i][slack_var_idx] = 1.;
+            b[i] = c.rhs;
+            x[slack_var_idx] = c.rhs;
+            base_var[i] = slack_var_idx;
+        }
+
+        for t in problem.objective.iter() {
+            c[t.var_idx] = -t.coef;
+        }
+
+        SimplexTable {
+            n,
+            m,
+            a,
+            b,
+            c,
+            x,
+            base_var,
+            obj,
+        }
+    }
+
+    fn create_auxiliary_table(problem: &problem::Problem) -> SimplexTable {
+        // 前提
+        // - 標準形に変換済みの問題を渡す
+        let n = problem.variables.len() + problem.constraints.len() + 1;
         let m = problem.constraints.len();
 
         let mut a = vec![vec![0.; n]; m];
@@ -48,7 +91,7 @@ impl SimplexModule {
             c[t.var_idx] = -t.coef;
         }
 
-        SimplexModule {
+        SimplexTable {
             n,
             m,
             a,
@@ -107,33 +150,33 @@ fn round_to_zero(v: f64) -> f64 {
 struct SimplexLpSolver;
 
 impl SimplexLpSolver {
-    fn solve_simplex(&self, module: &mut SimplexModule) {
-        module.dump();
+    fn solve_simplex(&self, table: &mut SimplexTable) {
+        table.dump();
 
         // 単体法
         loop {
             // 誤差対策: 0に近い値を0にする
-            module.round();
+            table.round();
 
             // 被約費用を計算し、変更する非基底変数を選択する
             // 最大係数規則 + Blandの最小添字規則
             let mut pivot_var_idx = 0;
-            for i in 0..module.n {
-                if module.c[i] < module.c[pivot_var_idx] {
+            for i in 0..table.n {
+                if table.c[i] < table.c[pivot_var_idx] {
                     pivot_var_idx = i;
                 }
             }
 
             // cで係数が負の項がない(=最適解が求まっている)
-            if module.c[pivot_var_idx] >= 0. {
+            if table.c[pivot_var_idx] >= 0. {
                 break;
             }
 
             // pivot_var_idxの上限(theta)を求める
             let mut theta = f64::MAX;
             let mut pivot_c_idx = 0;
-            for i in 0..module.m {
-                let theta_i = module.b[i] / module.a[i][pivot_var_idx];
+            for i in 0..table.m {
+                let theta_i = table.b[i] / table.a[i][pivot_var_idx];
                 if theta_i < theta {
                     theta = theta_i;
                     pivot_c_idx = i;
@@ -146,38 +189,38 @@ impl SimplexLpSolver {
             }
 
             // 単体表を更新する
-            let div = module.a[pivot_c_idx][pivot_var_idx];
-            for i in 0..module.n {
-                module.a[pivot_c_idx][i] /= div;
+            let div = table.a[pivot_c_idx][pivot_var_idx];
+            for i in 0..table.n {
+                table.a[pivot_c_idx][i] /= div;
             }
-            module.b[pivot_c_idx] /= div;
+            table.b[pivot_c_idx] /= div;
 
             // ピボット操作
-            module.base_var[pivot_c_idx] = pivot_var_idx;
+            table.base_var[pivot_c_idx] = pivot_var_idx;
 
             // 制約式の更新
-            for i in 0..module.m {
+            for i in 0..table.m {
                 if i == pivot_c_idx {
                     continue;
                 }
-                let mul = module.a[i][pivot_var_idx];
-                for j in 0..module.n {
-                    module.a[i][j] -= mul * module.a[pivot_c_idx][j];
+                let mul = table.a[i][pivot_var_idx];
+                for j in 0..table.n {
+                    table.a[i][j] -= mul * table.a[pivot_c_idx][j];
                 }
-                module.b[i] -= mul * module.b[pivot_c_idx];
+                table.b[i] -= mul * table.b[pivot_c_idx];
             }
 
             // 目的関数の更新
-            let mul = module.c[pivot_var_idx];
-            for i in 0..module.n {
-                module.c[i] -= mul * module.a[pivot_c_idx][i];
+            let mul = table.c[pivot_var_idx];
+            for i in 0..table.n {
+                table.c[i] -= mul * table.a[pivot_c_idx][i];
             }
-            module.obj -= mul * module.b[pivot_c_idx];
+            table.obj -= mul * table.b[pivot_c_idx];
 
-            module.dump();
+            table.dump();
         }
 
-        module.dump();
+        table.dump();
     }
 }
 
@@ -186,23 +229,28 @@ impl Solver for SimplexLpSolver {
         // 標準形に変換する
         let problem = problem.standardized();
 
-        // 実行可能解を見つける
-
         // 単体表を作成する
-        let mut module = SimplexModule::from(&problem);
+        // constraint.rhs < 0.が負の制約があれば原点は実行可能解ではないため、
+        // 補助問題を作成し、実行可能解を求める必要がある
+        let origin_is_feasible = problem.constraints.iter().all(|c| c.rhs >= 0.);
+        let mut table = if origin_is_feasible {
+            SimplexTable::create_normal_table(&problem)
+        } else {
+            SimplexTable::create_auxiliary_table(&problem)
+        };
 
         // 単体法を用いて解を見つける
-        self.solve_simplex(&mut module);
+        self.solve_simplex(&mut table);
 
         let mut ans = vec![0.; problem.variables.len()];
-        for (c_idx, base_var_idx) in module.base_var.iter().enumerate() {
+        for (c_idx, base_var_idx) in table.base_var.iter().enumerate() {
             if *base_var_idx < problem.variables.len() {
-                ans[*base_var_idx] = module.b[c_idx];
+                ans[*base_var_idx] = table.b[c_idx];
             }
         }
 
         // TODO: 解を返す
-        module.obj
+        table.obj
     }
 }
 
