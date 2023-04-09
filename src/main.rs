@@ -192,10 +192,10 @@ impl Solver for SimplexLpSolver {
 fn main() {
     let problem = parser::parse_lp_file(
         "maximize
-obj: 5 x + 4 y
+obj: 3 x1 + 2 x2
 st
-c1: 1.5 x + 3 y <= 13.5
-c2: 3 x + 1 y <= 10
+c1: 2 x1 + x2 <= 6
+c2: x1 + x2 <= 3
 end
 ",
     );
@@ -204,6 +204,23 @@ end
     let obj = solver.solve(&problem);
 
     eprintln!("objective value: {:.2}", obj);
+}
+
+#[test]
+fn test_cycling_lp_problem() {
+    let problem = parser::parse_lp_file(
+        "maximize
+obj: 3 x1 + 2 x2
+st
+c1: 2 x1 + x2 <= 6
+c2: x1 + x2 <= 3
+end
+",
+    );
+    let solver = SimplexLpSolver;
+    let obj = solver.solve(&problem);
+
+    assert!(f64::abs(obj - 9.) < EPS);
 }
 
 #[test]
