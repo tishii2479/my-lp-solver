@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "my-mlp-solver"
+name = "my-lp-solver"
 version = "0.1.0"
