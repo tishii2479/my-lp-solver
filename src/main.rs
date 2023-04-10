@@ -18,10 +18,12 @@ struct SimplexTable {
 }
 
 impl SimplexTable {
-    fn create_normal_table(problem: &problem::Problem) -> SimplexTable {
+    /// 単体表を作成する
+    /// requires:
+    /// - 標準形に変換済みの問題を渡す
+    fn from(problem: &problem::Problem) -> SimplexTable {
         // 前提
         // - 標準形に変換済みの問題を渡す
-        // - 原点が実行可能解である
         let n = problem.variables.len() + problem.constraints.len();
         let m = problem.constraints.len();
 
@@ -32,7 +34,6 @@ impl SimplexTable {
         let obj = 0.;
 
         for (i, c) in problem.constraints.iter().enumerate() {
-            assert!(c.rhs >= 0., "constraint has negative rhs: {:?}", c);
             for t in c.expr.iter() {
                 a[i][t.var_idx] = t.coef;
             }
@@ -60,53 +61,26 @@ impl SimplexTable {
         }
     }
 
-    fn create_auxiliary_table(problem: &problem::Problem) -> SimplexTable {
-        // 前提
-        // - 標準形に変換済みの問題を渡す
-        let n = problem.variables.len() + problem.constraints.len();
-        let m = problem.constraints.len();
-
-        let mut a = vec![vec![0.; n + 1]; m];
-        let mut b = vec![0.; m];
-        let mut c = vec![0.; n + 1];
-        let mut base_var = vec![0; m];
-        let obj = 0.;
-
-        let artificial_var_idx = n;
+    /// 補助問題を解くために、人為変数を追加した単体表に変換する
+    fn to_auxiliary_table(&mut self) {
+        // b[i](< 0)が最も小さい行に対してピボット操作を行い、実行可能な単体表を得る
         let mut artificial_c_idx = 0;
-
-        for (i, c) in problem.constraints.iter().enumerate() {
-            for t in c.expr.iter() {
-                a[i][t.var_idx] = t.coef;
-            }
-
-            let slack_var_idx = n - m + i;
-
-            a[i][slack_var_idx] = 1.;
-            a[i][artificial_var_idx] = -1.;
-            b[i] = c.rhs;
-            base_var[i] = slack_var_idx;
-
-            if b[i] < b[artificial_c_idx] {
+        // 人為変数の列を足す
+        for i in 0..self.m {
+            self.a[i].push(-1.);
+            if self.b[i] < self.b[artificial_c_idx] {
                 artificial_c_idx = i;
             }
         }
 
-        // 目的関数の作成
-        c[n] = 1.;
+        assert!(self.b[artificial_c_idx] < 0.);
 
-        let mut table = SimplexTable {
-            n: n + 1,
-            m,
-            a,
-            b,
-            c,
-            base_var,
-            obj,
-        };
-        table.pivot(artificial_c_idx, n);
+        // 目的変数の設定
+        self.c = vec![0.; self.n];
+        self.c.push(1.);
 
-        table
+        self.n += 1;
+        self.pivot(artificial_c_idx, self.n - 1);
     }
 
     fn calc_pivot_var_idx(&self) -> usize {
@@ -313,6 +287,7 @@ impl SimplexLpSolver {
     }
 }
 
+#[derive(Debug)]
 struct Solution {
     objective_value: f64,
     variable_values: HashMap<String, f64>,
@@ -327,17 +302,15 @@ impl Solver for SimplexLpSolver {
         // constraint.rhs < 0.が負の制約があれば原点は実行可能解ではないため、
         // 補助問題を作成し、実行可能解を求める必要がある
         let origin_is_feasible = problem.constraints.iter().all(|c| c.rhs >= 0.);
-        let mut table = if origin_is_feasible {
-            SimplexTable::create_normal_table(&problem)
-        } else {
-            let mut table = SimplexTable::create_auxiliary_table(&problem);
+        let mut table = SimplexTable::from(&problem);
+        if !origin_is_feasible {
+            table.to_auxiliary_table();
             self.solve_simplex(&mut table);
             if round_to_zero(table.obj) != 0. {
                 return Err("is not feasible".to_owned());
             }
             table.remove_aritifial_var(&problem);
-            table
-        };
+        }
 
         // 単体法を用いて解を見つける
         self.solve_simplex(&mut table);
@@ -357,7 +330,21 @@ impl Solver for SimplexLpSolver {
     }
 }
 
-fn main() {}
+fn main() {
+    let problem = parser::parse_lp_file(
+        "maximize
+obj: x1 + x2
+st
+c1: x1 + x2 <= 2
+c2: x1 + x2 >= 2
+end
+",
+    );
+    problem.output();
+    let solver = SimplexLpSolver;
+    let solution = solver.solve(&problem).unwrap();
+    dbg!(solution);
+}
 
 #[test]
 fn test_unfeasible_lp_problem() {
