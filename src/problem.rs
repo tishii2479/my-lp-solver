@@ -75,6 +75,10 @@ pub struct Variable {
     pub is_free: bool,
 }
 
+// ISSUE:
+// RawProblemとProblemに分けたい
+// RawProblem: 元の問題を保持するクラス。制約名、変数名などを保持する
+// Problem: 最適化用のクラス。標準形であることを前提とし、変数名などを保持しない
 #[derive(Clone)]
 pub struct Problem {
     pub is_maximize: bool,

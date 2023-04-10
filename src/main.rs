@@ -142,7 +142,7 @@ impl SimplexTable {
         self.obj -= mul * self.b[pivot_c_idx];
     }
 
-    fn round(&mut self) {
+    fn round_to_zero(&mut self) {
         for i in 0..self.m {
             for j in 0..self.n {
                 self.a[i][j] = round_to_zero(self.a[i][j]);
@@ -253,7 +253,7 @@ impl SimplexLpSolver {
         // 単体法
         loop {
             // 誤差対策: 0に近い値を0にする
-            table.round();
+            table.round_to_zero();
 
             // 被約費用を計算し、変更する非基底変数を選択する
             // 最大係数規則 + Blandの最小添字規則
